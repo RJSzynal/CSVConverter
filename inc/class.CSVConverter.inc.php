@@ -10,26 +10,32 @@
  *
  * public functions - get_arrayIn(), get_arrayOut(),
  *     get_arrayErr(), get_arrayRules(), get_arrayExists(),
- *     get_arrayFail(), get_numFields()
+ *     get_arrayFail(), get_arrayDone, get_numFields()
  * 
  * @author Robert Szynal <RJSzynal@Gmail.com>
  */
-class CSV {
+class CSVConverter {
 
     protected $fileLoc = '';
     protected $fieldTitles = array();
     protected $numFields = 0;
-    protected $mainArray = array();
+    protected $arrayIn = array();
+    protected $arrayOut = array();
+    protected $arrayErr = array();
+    protected $arrayFail = array();
+    protected $arrayRules = array();
+    protected $arrayExists = array();
+    protected $arrayDone = array();
     protected $fieldTypes = array('string', 'string', 'string', 'int', 'currency', 'bool');
     protected $discontinued = array('yes', 'Yes', 'YES', 'Y', 'y', 'Discontinued', 'discontinued', 'DISCONTINUED', '1'); // Possible positive values for the discontinued column
 
     public function __construct($tempFileLoc = '') {
         $this->fileLoc = $tempFileLoc;
-        $this->mainArray['in'] = self::csvToArray($this->fileLoc);
-        $this->mainArray['out'] = self::processArray($this->mainArray['in']);
-        $this->mainArray['out'] = self::recoverLongRows($this->mainArray['err']);
-        $this->mainArray['out'] = self::importRules($this->mainArray['out']);
-        self::dbInsert($this->mainArray['out']);
+        $this->arrayIn = self::csvToArray($this->fileLoc);
+        $this->arrayOut = self::rowLengthCheck($this->arrayIn);
+        $this->arrayOut = self::recoverLongRows($this->arrayErr);
+        $this->arrayOut = self::importRules($this->arrayOut);
+        self::dbInsert($this->arrayOut);
     }
 
     /**
@@ -42,41 +48,41 @@ class CSV {
             exit("ERROR: CSV file cannot be read or doesn't exist");
         }
 
-        $arrayOut = array();
+        $arrOut = array();
         if ( ( $openFile = fopen($fileIn, 'r') ) !== FALSE ) {// create a connection to the file
             while ( ( $row = fgetcsv($openFile) ) !== FALSE ) {
                 if ( !$this->fieldTitles ) {
                     $this->fieldTitles = $row; // record the field titles to use later
                     $this->numFields = count($this->fieldTitles);
                 } else {
-                    $arrayOut[] = $row;
+                    $arrOut[] = $row;
                 }
             }
             fclose($openFile); // close the connection to the file when we're done
         } else {
             exit("ERROR: Failed to open connection to CSV");
         }
-        return $arrayOut;
+        return $arrOut;
     }
 // end of csvToArray
 
     /**
-     * @desc Ensure each field of the array is correctly formatted
+     * @desc Separate any rows which are not the correct length
      * @param array $arrIn - Array to process
      * @return array Array of successfully processed rows
      */
-    protected function processArray($arrIn = '') {
-        $arrayOut = array();
+    protected function rowLengthCheck($arrIn = '') {
+        $arrOut = array();
         foreach ( $arrIn as $row ) {
             if ( count($row) !== $this->numFields ) {
-                $this->mainArray['err'][] = $row;
+                $this->arrayErr[] = $row;
             } else {
-                $arrayOut[] = self::parseRow($row, $this->fieldTypes);
+                $arrOut[] = self::parseRow($row, $this->fieldTypes);
             }
         }
-        return $arrayOut;
+        return $arrOut;
     }
-// end of processArray
+// end of rowLengthCheck
 
     /**
      * @desc Ensure each field of the array is the correct type
@@ -101,30 +107,30 @@ class CSV {
 
     /**
      * @desc Try to recover bad rows which have too many fields
-     * @param array $arrIn - Array to process
-     * @return array CSV data in array form
+     * @param array $arrIn - Array of errored rows to process
+     * @return array Array of correct length rows
      */
     protected function recoverLongRows($arrIn = '') {
         $arrayTemp = array();
-        unset($this->mainArray['err']);
+        unset($this->arrayErr);
 
         foreach ( $arrIn as $row ) {
             if ( count($row) > $this->numFields ) {
                 $qtyBadCommas = count($row) - $this->numFields;
                 $arrayTemp[] = SELF::quoteSplitField($row, $qtyBadCommas);
             } else {
-                $this->mainArray['err'][] = $row;
+                $this->arrayErr[] = $row;
             }
         }
-        $arrayOut = self::processArray($arrayTemp);
-        return array_merge($arrayOut, $this->mainArray['out']);
+        $arrOut = self::rowLengthCheck($arrayTemp); // Re-process the previously errored rows
+        return array_merge($arrOut, $this->arrayOut);
     }
 
     /**
-     * @desc Try to recover bad rows which have too many fields
-     * @param array $row - Array to process
-     * @param int $qtyBadCommas - number of extra commas in array
-     * @return array fixed or failed array returned
+     * @desc Try to quote text blocks with commas in
+     * @param array $row - Row to process
+     * @param int $qtyBadCommas - number of extra commas in row
+     * @return array fixed or untouched array returned
      */
     private function quoteSplitField($row, $qtyBadCommas) {
         $tempRow = $row;
@@ -143,74 +149,62 @@ class CSV {
         }
         $csvRow = implode(",", $tempRow); // Turn it back to a string so we can re-parse it
         if ( substr_count($csvRow, ', ') === $qtyBadCommas ) { // Have we caught all the bad commas?
-            $arrayOut = str_getcsv($csvRow); // Fixed row
+            $arrOut = str_getcsv($csvRow); // Fixed row
         } else {
-            $arrayOut = $row; // Untouched row
+            $arrOut = $row; // Untouched row
         }
-        return $arrayOut;
+        return $arrOut;
     }
 
     /**
      * @desc Filter array through import rules, removing rows which don't pass
      * @param array $arrIn - Array to process
-     * @return array Array of successfully processed rows
+     * @return array Array of rows which pass the import rules
      */
     protected function importRules($arrIn = '') {
-        $arrayOut = array();
+        $arrOut = array();
         foreach ( $arrIn as $row ) {
-            //Any stock item which costs less that �5 AND has less than 10 stock will not be imported
-            //Any stock items which cost over �1000 will not be imported
+            //Any stock item which costs less that £5 AND has less than 10 stock will not be imported
+            //Any stock items which cost over £1000 will not be imported
             if ( ($row[3] < 10 && $row[4] < 5.0) || $row[4] > 1000.0 ) {
-                $this->mainArray['rules'][] = $row;
+                $this->arrayRules[] = $row;
             } else {
-                $arrayOut[] = $row;
+                $arrOut[] = $row;
             }
         }
-        return $arrayOut;
+        return $arrOut;
     }
 // end of importRules
 
     /**
      * @desc takes array as input and inserts each item into the database 
-     * @param array $arrIn - Array to process
+     * @param array $arrIn - Array of rows to insert
      * @return bool True on success
      */
     protected function dbInsert($arrIn = '') {
-        unset($this->mainArray['out']);
-        require( "inc/db.ebuyerTest.inc.php" );
-        $database = new Database('tblproductdata');
-
-        $database->beginTransaction(); // Disable auto-commit to ensure script completes successfully before commiting to the DB
-        // Prep the queries we'll be using before the loop to improve efficiency
-        $insertQry = 'INSERT INTO tblproductdata (strProductCode, strProductName, strProductDesc, intStock, numCost, dtmAdded, dtmDiscontinued) '
-                . 'VALUES (:code, :name, :description, :stock, :cost, CURRENT_TIMESTAMP, :discontinued)';
-        $database->prepareInsert($insertQry);
+        require( "config/config.ebuyerTest.inc.php" );
+        
+        $dbEbuyer = new EbuyerDB('tblproductdata');
+        $dbEbuyer->beginTransaction(); // Disable auto-commit to ensure script completes successfully before commiting to the DB
 
         foreach ( $arrIn as $row ) {
-            $arrayInsert = array(
-                ':code' => $row[0],
-                ':name' => $row[1],
-                ':description' => $row[2],
-                ':stock' => $row[3],
-                ':cost' => $row[4],
-                ':discontinued' => ($row[5]) ? date('Y-m-d H:i:s') : NULL);
-            $arrayReturned = $database->executeInsert($arrayInsert);
+            $arrayReturned = $dbEbuyer->executeInsert($row);
             switch ($arrayReturned[0]) {
-                case 'out':
-                    $this->mainArray['out'][] = $arrayReturned[1];
+                case 'done':
+                    $this->arrayDone[] = $arrayReturned[1];
                     break;
                 case 'fail':
-                    $this->mainArray['fail'][] = $arrayReturned[1];
+                    $this->arrayFail[] = $arrayReturned[1];
                     break;
                 case 'exists':
-                    $this->mainArray['exists'][] = $arrayReturned[1];
+                    $this->arrayExists[] = $arrayReturned[1];
                     break;
             }
         }
         if ( $GLOBALS['test'] ) {
-            $database->cancelTransaction();
+            $dbEbuyer->cancelTransaction();
         } else {
-            $database->endTransaction();
+            $dbEbuyer->CommitTransaction();
         }
         return TRUE;
     }
@@ -218,56 +212,65 @@ class CSV {
 // ***********************Public Get Functions*********************** 
 
     /**
-     * @desc Outputs mainArray['in'] variable
+     * @desc Outputs arrayIn variable
      * @return var Returns variable or NULL
      */
     public function get_arrayIn() {
-        return (isset($this->mainArray['in'])) ? $this->mainArray['in'] : NULL;
+        return (isset($this->arrayIn)) ? $this->arrayIn : NULL;
     }
 //end of get_arrayIn
 
     /**
-     * @desc Outputs mainArray['err'] variable
+     * @desc Outputs arrayErr variable
      * @return var Returns variable or NULL
      */
     public function get_arrayErr() {
-        return (isset($this->mainArray['err'])) ? $this->mainArray['err'] : NULL;
+        return (isset($this->arrayErr)) ? $this->arrayErr : NULL;
     }
 //end of get_arrayErr
 
     /**
-     * @desc Outputs mainArray['out'] variable
+     * @desc Outputs arrayOut variable
      * @return var Returns variable or NULL
      */
     public function get_arrayOut() {
-        return (isset($this->mainArray['out'])) ? $this->mainArray['out'] : NULL;
+        return (isset($this->arrayOut)) ? $this->arrayOut : NULL;
     }
 //end of get_arrayOut
 
     /**
-     * @desc Outputs mainArray['rules'] variable
+     * @desc Outputs arrayRules variable
      * @return var Returns variable or NULL
      */
     public function get_arrayRules() {
-        return (isset($this->mainArray['rules'])) ? $this->mainArray['rules'] : NULL;
+        return (isset($this->arrayRules)) ? $this->arrayRules : NULL;
     }
 //end of get_arrayRules
 
     /**
-     * @desc Outputs mainArray['exists'] variable
+     * @desc Outputs arrayExists variable
      * @return var Returns variable or NULL
      */
     public function get_arrayExists() {
-        return (isset($this->mainArray['exists'])) ? $this->mainArray['exists'] : NULL;
+        return (isset($this->arrayExists)) ? $this->arrayExists : NULL;
     }
 //end of get_arrayExists
 
     /**
-     * @desc Outputs mainArray['fail'] variable
+     * @desc Outputs arrayFail variable
      * @return var Returns variable or NULL
      */
     public function get_arrayFail() {
-        return (isset($this->mainArray['fail'])) ? $this->mainArray['fail'] : NULL;
+        return (isset($this->arrayFail)) ? $this->arrayFail : NULL;
+    }
+//end of get_arrayFail
+
+    /**
+     * @desc Outputs arrayFail variable
+     * @return var Returns variable or NULL
+     */
+    public function get_arrayDone() {
+        return (isset($this->arrayDone)) ? $this->arrayDone : NULL;
     }
 //end of get_arrayFail
 

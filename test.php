@@ -16,7 +16,7 @@ if ( $GLOBALS['test'] ) {
 }
 
 // Create a new instance of our class to begin proccessing
-$itemList = new CSV($options["f"]);
+$itemList = new CSVConverter($options["f"]);
 
 /* **************************************************************
  * Everything below is just for displaying to the command line UI
@@ -24,7 +24,7 @@ $itemList = new CSV($options["f"]);
 $numIn = count($itemList->get_arrayIn());
 echo "Items Proccessed: $numIn" . PHP_EOL;
 
-$numSuccess = count($itemList->get_arrayOut());
+$numSuccess = count($itemList->get_arrayDone());
 echo "Items Successful: $numSuccess" . PHP_EOL;
 
 $numErr = count($itemList->get_arrayErr()) + count($itemList->get_arrayFail()) + count($itemList->get_arrayExists()) + count($itemList->get_arrayRules());

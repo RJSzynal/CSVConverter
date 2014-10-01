@@ -182,7 +182,7 @@ class CSVConverter {
      * @return bool True on success
      */
     protected function dbInsert($arrIn = '') {
-        require( "config/config.ebuyerTest.inc.php" );
+        require( "config/config.ebuyerTest.inc.php" ); // Set database access configuration in preperation for connecting
         
         $dbEbuyer = new EbuyerDB('tblproductdata');
         $dbEbuyer->beginTransaction(); // Disable auto-commit to ensure script completes successfully before commiting to the DB

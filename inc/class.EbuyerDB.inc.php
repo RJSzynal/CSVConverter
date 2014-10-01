@@ -99,7 +99,7 @@ class EbuyerDB {
     /**
      * @desc Executes the exists query to check if the item is already in the DB
      * @param array $code - The product code of the item to insert
-     * @return int Number of rows returned
+     * @return int Number of rows found
      */
     private function executeExists($code) {
         $this->stmtExists->execute(array($code));

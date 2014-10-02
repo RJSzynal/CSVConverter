@@ -253,19 +253,16 @@ class CSVConverter {
         if ( $this->testMode ) {
             $stringOutput .= str_pad("RUNNING IN TEST MODE", 79, "*", STR_PAD_BOTH) . PHP_EOL;
         }
-        $numIn = count($this->arrayIn);
-        $stringOutput .= "Items Proccessed: $numIn" . PHP_EOL;
-
-        $numSuccess = count($this->arrayDone);
-        $stringOutput .= "Items Successful: $numSuccess" . PHP_EOL;
-
-        $numErr = count($this->arrayErr) + count($this->arrayFail) + count($this->arrayExists) + count($this->arrayRules);
-        $stringOutput .= "Items Skipped:    $numErr" . PHP_EOL;
+        $stringOutput .= str_pad("Items Proccessed: ", 18) . count($this->arrayIn) . PHP_EOL;
+        $stringOutput .= str_pad("Items Successful: ", 18) . count($this->arrayDone) . PHP_EOL;
+        $stringOutput .= str_pad("Items Skipped: ", 18) . count($this->arrayRules) . PHP_EOL;
+        $numErr = count($this->arrayErr) + count($this->arrayFail) + count($this->arrayExists);
+        $stringOutput .= str_pad("Items Failed: ", 18) . $numErr . PHP_EOL;
 
         if ( count($this->arrayErr) ) {
             $stringOutput .= str_pad("Skipped Items (Error)", 79, "-", STR_PAD_BOTH) . PHP_EOL;
             foreach ( $this->arrayErr as $currVal ) {
-                $stringOutput .= "|" . $currVal[0] . " |" . str_pad($currVal[1], 13) . "|" . str_pad($currVal[2], 38) . "|" . PHP_EOL;
+                $stringOutput .= "|" . str_pad(implode(',', $currVal), 77) . "|" . PHP_EOL;
             }
         }
 

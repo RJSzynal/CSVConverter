@@ -10,13 +10,18 @@
  *
  * public functions - get_arrayIn(), get_arrayOut(),
  *     get_arrayErr(), get_arrayRules(), get_arrayExists(),
- *     get_arrayFail(), get_arrayDone, get_numFields()
+ *     get_arrayFail(), get_arrayDone, get_numFields(),
+ *     getCLIOutput()
  * 
  * @author Robert Szynal <RJSzynal@Gmail.com>
  */
 class CSVConverter {
 
     protected $fileLoc = '';
+    protected $testMode = FALSE;
+    protected $databaseConfig = 'config/config.ebuyerTest.inc.php';
+    protected $sourceCharSet = 'UTF-8';
+    protected $databaseCharSet = 'ISO-8859-1'; // the database charset is 'latin1' a.k.a ISO-8859-1, iso-ir-100, csISOLatin1, latin1, l1, IBM819, CP819
     protected $fieldTitles = array();
     protected $numFields = 0;
     protected $arrayIn = array();
@@ -29,8 +34,9 @@ class CSVConverter {
     protected $fieldTypes = array('string', 'string', 'string', 'int', 'currency', 'bool');
     protected $discontinued = array('yes', 'Yes', 'YES', 'Y', 'y', 'Discontinued', 'discontinued', 'DISCONTINUED', '1'); // Possible positive values for the discontinued column
 
-    public function __construct($tempFileLoc = '') {
+    public function __construct($tempFileLoc, $isTest = FALSE) {
         $this->fileLoc = $tempFileLoc;
+        $this->testMode = $isTest;
         $this->arrayIn = self::csvToArray($this->fileLoc);
         $this->arrayOut = self::rowLengthCheck($this->arrayIn);
         $this->arrayOut = self::recoverLongRows($this->arrayErr);
@@ -41,11 +47,12 @@ class CSVConverter {
     /**
      * @desc takes a file location as input and outputs an array of the contents
      * @param string $fileIn - The location of the CSV
+     * @throws Exception
      * @return array CSV data in array form
      */
     protected function csvToArray($fileIn = '') {
         if ( !file_exists($fileIn) || !is_readable($fileIn) ) {
-            exit("ERROR: CSV file cannot be read or doesn't exist");
+            throw new Exception("ERROR: CSV file cannot be read or doesn't exist." . PHP_EOL);
         }
 
         $arrOut = array();
@@ -60,7 +67,7 @@ class CSVConverter {
             }
             fclose($openFile); // close the connection to the file when we're done
         } else {
-            exit("ERROR: Failed to open connection to CSV");
+            throw new Exception("ERROR: Failed to open connection to CSV. Please try again." . PHP_EOL);
         }
         return $arrOut;
     }
@@ -93,7 +100,8 @@ class CSVConverter {
     private function parseRow($row, $types) {
         for ( $i = 0; $i < count($types); $i++ ) {
             if ( $types[$i] === 'string' ) {
-                $row[$i] = iconv("UTF-8", "ISO-8859-1//TRANSLIT", (string) $row[$i]);
+                // Ensure encoding is correct for the database translating any characters to the destination character set
+                $row[$i] = iconv($this->sourceCharSet, $this->databaseCharSet . "//TRANSLIT", (string) $row[$i]);
             } else if ( $types[$i] === 'int' ) {
                 $row[$i] = (int) $row[$i];
             } else if ( $types[$i] === 'currency' ) {
@@ -177,13 +185,28 @@ class CSVConverter {
 // end of importRules
 
     /**
+     * @desc Set database access configuration in preperation for connecting
+     * @param string $databaseConfig - Location of database config file
+     * @throws Exception
+     * @return bool True on success
+     */
+    protected function setDatabaseConfig($databaseConfig) {
+        if ( file_exists($databaseConfig) && is_readable($databaseConfig) ) {
+            require( $databaseConfig );
+        } else {
+            throw new Exception('Database configuration file could not be found or read.' . PHP_EOL);
+        }
+        return TRUE;
+    }
+// end of setDatabaseConfig
+
+    /**
      * @desc takes array as input and inserts each item into the database 
      * @param array $arrIn - Array of rows to insert
      * @return bool True on success
      */
-    protected function dbInsert($arrIn = '') {
-        require( "config/config.ebuyerTest.inc.php" ); // Set database access configuration in preperation for connecting
-        
+    protected function dbInsert($arrIn) {
+        self::setDatabaseConfig($this->databaseConfig);
         $dbEbuyer = new EbuyerDB('tblproductdata');
         $dbEbuyer->beginTransaction(); // Disable auto-commit to ensure script completes successfully before commiting to the DB
 
@@ -201,14 +224,83 @@ class CSVConverter {
                     break;
             }
         }
-        if ( $GLOBALS['test'] ) {
+        if ( $this->testMode ) {
             $dbEbuyer->cancelTransaction();
         } else {
             $dbEbuyer->CommitTransaction();
         }
         return TRUE;
     }
-// end of importRules
+// end of dbInsert
+
+    /**
+     * @desc create full CLI row for given item
+     * @param array $row - Array of item information
+     * @return string CLI row of item
+     */
+    private function printFullRowCLI($row) {
+        return "|" . $row[0] . " |" . str_pad($row[1], 13) . "|" . str_pad($row[2], 38) . "|" . str_pad($row[3], 2) . "|" . str_pad($row[4], 7) . "|" . (($row[5]) ? "      " : "Active") . "|" . PHP_EOL;
+    }
+// end of printFullRowCLI
+
+    /**
+     * @desc returns CLI output showing the results of the class after process
+     * @return string CLI output
+     */
+    public function getCLIOutput() {
+        $stringOutput = '';
+
+        if ( $this->testMode ) {
+            $stringOutput .= str_pad("RUNNING IN TEST MODE", 79, "*", STR_PAD_BOTH) . PHP_EOL;
+        }
+        $numIn = count($this->arrayIn);
+        $stringOutput .= "Items Proccessed: $numIn" . PHP_EOL;
+
+        $numSuccess = count($this->arrayDone);
+        $stringOutput .= "Items Successful: $numSuccess" . PHP_EOL;
+
+        $numErr = count($this->arrayErr) + count($this->arrayFail) + count($this->arrayExists) + count($this->arrayRules);
+        $stringOutput .= "Items Skipped:    $numErr" . PHP_EOL;
+
+        if ( count($this->arrayErr) ) {
+            $stringOutput .= str_pad("Skipped Items (Error)", 79, "-", STR_PAD_BOTH) . PHP_EOL;
+            foreach ( $this->arrayErr as $currVal ) {
+                $stringOutput .= "|" . $currVal[0] . " |" . str_pad($currVal[1], 13) . "|" . str_pad($currVal[2], 38) . "|" . PHP_EOL;
+            }
+        }
+
+        if ( count($this->arrayRules) ) {
+            $stringOutput .= str_pad("Skipped Items (Import Rules)", 79, "-", STR_PAD_BOTH) . PHP_EOL;
+            foreach ( $this->arrayRules as $currVal ) {
+                $stringOutput .= self::printFullRowCLI($currVal);
+            }
+        }
+
+        if ( count($this->arrayExists) ) {
+            $stringOutput .= str_pad("Skipped Items (Item already in DB)", 79, "-", STR_PAD_BOTH) . PHP_EOL;
+            foreach ( $this->arrayExists as $currVal ) {
+                $stringOutput .= self::printFullRowCLI($currVal);
+            }
+        }
+
+        if ( count($this->arrayFail) ) {
+            $stringOutput .= str_pad("Skipped Items (Item insertion failed)", 79, "-", STR_PAD_BOTH) . PHP_EOL;
+            foreach ( $this->arrayFail as $currVal ) {
+                $stringOutput .= self::printFullRowCLI($currVal);
+            }
+        }
+
+        if ( $this->testMode ) {
+            if ( count($this->arrayDone) ) {
+                $stringOutput .= str_pad("Successful Rows", 79, "-", STR_PAD_BOTH) . PHP_EOL;
+                foreach ( $this->arrayDone as $currVal ) {
+                    $stringOutput .= self::printFullRowCLI($currVal);
+                }
+            }
+        }
+        return $stringOutput;
+    }
+// end of getCLIOutput
 // ***********************Public Get Functions*********************** 
 
     /**

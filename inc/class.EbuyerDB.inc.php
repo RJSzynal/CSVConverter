@@ -5,7 +5,7 @@
  *
  * This class prepares the connection to the database
  * and performs existance checks on each item before
- *  inserting new items into the database
+ * inserting new items into the database
  *
  * public functions - prepareInsert(), executeInsert(),
  *     prepareExists(), executeExists(), beginTransaction(),

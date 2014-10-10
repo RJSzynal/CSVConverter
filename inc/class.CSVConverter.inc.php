@@ -401,4 +401,3 @@ class CSVConverter
     }
 //end of get_numFields
 }
-?>
